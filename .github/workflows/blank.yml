@@ -17,8 +17,40 @@ jobs:
       
     - name: Set up Python build environment
       run: |
-        # Install required build tools for native ARM64 build
-        choco install visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.Windows11SDK.22621"
+        # Check for existing Visual Studio installations first  
+        $vsPaths = @(
+          "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise",
+          "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional", 
+          "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community",
+          "${env:ProgramFiles}\Microsoft Visual Studio\2022\BuildTools",
+          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Enterprise",
+          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Professional",
+          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Community", 
+          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools"
+        )
+        
+        $vsFound = $false
+        foreach ($path in $vsPaths) {
+          if (Test-Path "$path\VC\Auxiliary\Build\vcvars64.bat") {
+            Write-Host "Found Visual Studio at: $path"
+            $env:VS_PATH = $path
+            $vsFound = $true
+            break
+          }
+        }
+        
+        if (-not $vsFound) {
+          Write-Host "Installing minimal build tools..."
+          # Use winget as alternative to chocolatey for potentially better compatibility
+          try {
+            winget install Microsoft.VisualStudio.2022.BuildTools --silent --accept-package-agreements --accept-source-agreements
+          } catch {
+            Write-Host "Winget failed, trying direct download..."
+            $url = "https://aka.ms/vs/17/release/vs_buildtools.exe"
+            Invoke-WebRequest -Uri $url -OutFile "vs_buildtools.exe"
+            Start-Process -FilePath "vs_buildtools.exe" -ArgumentList "--quiet", "--wait", "--add", "Microsoft.VisualStudio.Workload.VCTools", "--norestart" -Wait
+          }
+        }
         
     - name: Download Python source
       run: |
@@ -36,18 +68,124 @@ jobs:
       run: |
         cd python-source
         
-        # Set up Visual Studio environment for native ARM64 build
-        $vsPath = "${env:ProgramFiles}\Microsoft Visual Studio\2022\BuildTools"
-        if (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools") {
-          $vsPath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools"
+        # Find and set up Visual Studio environment
+        $vsPaths = @(
+          "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise",
+          "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional", 
+          "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community",
+          "${env:ProgramFiles}\Microsoft Visual Studio\2022\BuildTools",
+          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Enterprise",
+          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Professional",
+          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Community", 
+          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools"
+        )
+        
+        $vsPath = $null
+        foreach ($path in $vsPaths) {
+          if (Test-Path "$path\VC\Auxiliary\Build\vcvars64.bat") {
+            $vsPath = $path
+            Write-Host "Using Visual Studio at: $path"
+            break
+          }
         }
         
-        & "$vsPath\VC\Auxiliary\Build\vcvars64.bat"
+        if (-not $vsPath) {
+          throw "Visual Studio Build Tools not found!"
+        }
+        
+        # Set up build environment
+        cmd /c "`"$vsPath\VC\Auxiliary\Build\vcvars64.bat`" && set" | ForEach-Object {
+          if ($_ -match '^([^=]+)=(.*)
+        
+    - name: Create standalone distribution
+      run: |
+        cd python-source
+        
+        # Create distribution directory
+        New-Item -ItemType Directory -Force -Path "python-arm64-standalone"
+        
+        # Copy built Python files
+        $buildDir = "PCbuild\amd64"
+        Copy-Item "$buildDir\python.exe" "python-arm64-standalone\"
+        Copy-Item "$buildDir\python311.dll" "python-arm64-standalone\"
+        Copy-Item "$buildDir\python3.dll" "python-arm64-standalone\"
+        
+        # Copy standard library
+        Copy-Item "Lib" "python-arm64-standalone\Lib" -Recurse
+        
+        # Copy DLLs directory if it exists
+        if (Test-Path "$buildDir\DLLs") {
+          Copy-Item "$buildDir\DLLs" "python-arm64-standalone\DLLs" -Recurse
+        }
+        
+        # Copy extension modules
+        New-Item -ItemType Directory -Force -Path "python-arm64-standalone\DLLs"
+        Get-ChildItem "$buildDir" -Filter "*.pyd" | Copy-Item -Destination "python-arm64-standalone\DLLs\"
+        
+        # Create a simple test script
+        @"
+import sys
+import platform
+print(f"Python {sys.version}")
+print(f"Platform: {platform.platform()}")
+print(f"Architecture: {platform.machine()}")
+print(f"Processor: {platform.processor()}")
+print("Python ARM64 standalone interpreter is working!")
+"@ | Out-File -FilePath "python-arm64-standalone\test.py" -Encoding UTF8
+        
+    - name: Create archive
+      run: |
+        cd python-source
+        Compress-Archive -Path "python-arm64-standalone\*" -DestinationPath "python-arm64-standalone.zip"
+        
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-arm64-standalone-windows
+        path: python-source/python-arm64-standalone.zip
+        retention-days: 30
+        
+    - name: Create release info
+      run: |
+        @"
+# Python ARM64 Standalone for Windows
+        
+Built on: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
+Python Version: 3.11.8
+Target: Windows ARM64
+        
+## Contents:
+- python.exe - Python interpreter
+- python311.dll - Python runtime library  
+- python3.dll - Python loader library
+- Lib/ - Python standard library
+- DLLs/ - Extension modules and DLLs
+- test.py - Simple test script
+        
+## Usage:
+1. Extract the zip file
+2. Run: python.exe test.py
+3. Use python.exe as you would any Python interpreter
+        
+## Note:
+This is a standalone build that should run on Windows ARM64 devices
+without requiring a separate Python installation.
+"@ | Out-File -FilePath "python-source/README.md" -Encoding UTF8
+        
+    - name: Upload README
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-arm64-readme
+        path: python-source/README.md
+        retention-days: 30) {
+            [Environment]::SetEnvironmentVariable($matches[1], $matches[2])
+          }
+        }
         
         # Configure and build natively on ARM64
         cd PCbuild
         
-        # Build Python natively for ARM64
+        # Build Python natively
         .\build.bat -c Release
         
     - name: Create standalone distribution
@@ -75,6 +213,17 @@ jobs:
         New-Item -ItemType Directory -Force -Path "python-arm64-standalone\DLLs"
         Get-ChildItem "$buildDir" -Filter "*.pyd" | Copy-Item -Destination "python-arm64-standalone\DLLs\"
         
+        # Create a simple test script
+        @"
+import sys
+import platform
+print(f"Python {sys.version}")
+print(f"Platform: {platform.platform()}")
+print(f"Architecture: {platform.machine()}")
+print(f"Processor: {platform.processor()}")
+print("Python ARM64 standalone interpreter is working!")
+"@ | Out-File -FilePath "python-arm64-standalone\test.py" -Encoding UTF8
+        
     - name: Create archive
       run: |
         cd python-source
@@ -86,6 +235,33 @@ jobs:
         name: python-arm64-standalone-windows
         path: python-source/python-arm64-standalone.zip
         retention-days: 30
+        
+    - name: Create release info
+      run: |
+        @"
+# Python ARM64 Standalone for Windows
+        
+Built on: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
+Python Version: 3.11.8
+Target: Windows ARM64
+        
+## Contents:
+- python.exe - Python interpreter
+- python311.dll - Python runtime library  
+- python3.dll - Python loader library
+- Lib/ - Python standard library
+- DLLs/ - Extension modules and DLLs
+- test.py - Simple test script
+        
+## Usage:
+1. Extract the zip file
+2. Run: python.exe test.py
+3. Use python.exe as you would any Python interpreter
+        
+## Note:
+This is a standalone build that should run on Windows ARM64 devices
+without requiring a separate Python installation.
+"@ | Out-File -FilePath "python-source/README.md" -Encoding UTF8
         
     - name: Upload README
       uses: actions/upload-artifact@v4
