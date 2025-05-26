@@ -75,17 +75,6 @@ jobs:
         New-Item -ItemType Directory -Force -Path "python-arm64-standalone\DLLs"
         Get-ChildItem "$buildDir" -Filter "*.pyd" | Copy-Item -Destination "python-arm64-standalone\DLLs\"
         
-        # Create a simple test script
-        @"
-import sys
-import platform
-print(f"Python {sys.version}")
-print(f"Platform: {platform.platform()}")
-print(f"Architecture: {platform.machine()}")
-print(f"Processor: {platform.processor()}")
-print("Python ARM64 standalone interpreter is working!")
-"@ | Out-File -FilePath "python-arm64-standalone\test.py" -Encoding UTF8
-        
     - name: Create archive
       run: |
         cd python-source
