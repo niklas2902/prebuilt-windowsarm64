@@ -1,0 +1,133 @@
+name: Build Windows ARM64 Python Standalone
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-python-arm64:
+    runs-on: windows-11-arm
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python build environment
+      run: |
+        # Install required build tools for native ARM64 build
+        choco install visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.Windows11SDK.22621"
+        
+    - name: Download Python source
+      run: |
+        $pythonVersion = "3.11.8"
+        $url = "https://www.python.org/ftp/python/$pythonVersion/Python-$pythonVersion.tgz"
+        Invoke-WebRequest -Uri $url -OutFile "Python-$pythonVersion.tgz"
+        
+        # Extract using tar (available in Windows 10+)
+        tar -xzf "Python-$pythonVersion.tgz"
+        
+        # Rename for easier reference
+        Rename-Item "Python-$pythonVersion" "python-source"
+      
+    - name: Build Python for ARM64
+      run: |
+        cd python-source
+        
+        # Set up Visual Studio environment for native ARM64 build
+        $vsPath = "${env:ProgramFiles}\Microsoft Visual Studio\2022\BuildTools"
+        if (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools") {
+          $vsPath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools"
+        }
+        
+        & "$vsPath\VC\Auxiliary\Build\vcvars64.bat"
+        
+        # Configure and build natively on ARM64
+        cd PCbuild
+        
+        # Build Python natively for ARM64
+        .\build.bat -c Release
+        
+    - name: Create standalone distribution
+      run: |
+        cd python-source
+        
+        # Create distribution directory
+        New-Item -ItemType Directory -Force -Path "python-arm64-standalone"
+        
+        # Copy built Python files
+        $buildDir = "PCbuild\amd64"
+        Copy-Item "$buildDir\python.exe" "python-arm64-standalone\"
+        Copy-Item "$buildDir\python311.dll" "python-arm64-standalone\"
+        Copy-Item "$buildDir\python3.dll" "python-arm64-standalone\"
+        
+        # Copy standard library
+        Copy-Item "Lib" "python-arm64-standalone\Lib" -Recurse
+        
+        # Copy DLLs directory if it exists
+        if (Test-Path "$buildDir\DLLs") {
+          Copy-Item "$buildDir\DLLs" "python-arm64-standalone\DLLs" -Recurse
+        }
+        
+        # Copy extension modules
+        New-Item -ItemType Directory -Force -Path "python-arm64-standalone\DLLs"
+        Get-ChildItem "$buildDir" -Filter "*.pyd" | Copy-Item -Destination "python-arm64-standalone\DLLs\"
+        
+        # Create a simple test script
+        @"
+import sys
+import platform
+print(f"Python {sys.version}")
+print(f"Platform: {platform.platform()}")
+print(f"Architecture: {platform.machine()}")
+print(f"Processor: {platform.processor()}")
+print("Python ARM64 standalone interpreter is working!")
+"@ | Out-File -FilePath "python-arm64-standalone\test.py" -Encoding UTF8
+        
+    - name: Create archive
+      run: |
+        cd python-source
+        Compress-Archive -Path "python-arm64-standalone\*" -DestinationPath "python-arm64-standalone.zip"
+        
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-arm64-standalone-windows
+        path: python-source/python-arm64-standalone.zip
+        retention-days: 30
+        
+    - name: Create release info
+      run: |
+        @"
+# Python ARM64 Standalone for Windows
+        
+Built on: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
+Python Version: 3.11.8
+Target: Windows ARM64
+        
+## Contents:
+- python.exe - Python interpreter
+- python311.dll - Python runtime library  
+- python3.dll - Python loader library
+- Lib/ - Python standard library
+- DLLs/ - Extension modules and DLLs
+- test.py - Simple test script
+        
+## Usage:
+1. Extract the zip file
+2. Run: python.exe test.py
+3. Use python.exe as you would any Python interpreter
+        
+## Note:
+This is a standalone build that should run on Windows ARM64 devices
+without requiring a separate Python installation.
+"@ | Out-File -FilePath "python-source/README.md" -Encoding UTF8
+        
+    - name: Upload README
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-arm64-readme
+        path: python-source/README.md
+        retention-days: 30
