@@ -73,20 +73,28 @@ jobs:
         $dist = "python-arm64-standalone"
         $buildDir = "PCbuild\arm64"
 
+        # Clean and create destination directory
+        Remove-Item -Recurse -Force $dist -ErrorAction SilentlyContinue
         New-Item -ItemType Directory -Force -Path $dist
+
+        # Copy binaries
         Copy-Item "$buildDir\python.exe" "$dist\"
-        Copy-Item "$buildDir\python311.dll" "$dist\" -ErrorAction SilentlyContinue
+        Copy-Item "$buildDir\pythonw.exe" "$dist\" -ErrorAction SilentlyContinue
         Copy-Item "$buildDir\python3.dll" "$dist\" -ErrorAction SilentlyContinue
+        Copy-Item "$buildDir\python*.dll" "$dist\" -ErrorAction SilentlyContinue
+        Copy-Item "$buildDir\vcruntime140*.dll" "$dist\" -ErrorAction SilentlyContinue
 
-        Copy-Item "Lib" "$dist\Lib" -Recurse
-
-        if (Test-Path "$buildDir\DLLs") {
-          Copy-Item "$buildDir\DLLs" "$dist\DLLs" -Recurse
+        # Copy directories
+        foreach ($dir in "DLLs", "include", "Lib", "libs", "Scripts", "tcl") {
+          if (Test-Path $dir) {
+            Copy-Item $dir "$dist\$dir" -Recurse
+          }
         }
 
-        $dllDir = "$dist\DLLs"
-        New-Item -ItemType Directory -Force -Path $dllDir
-        Get-ChildItem "$buildDir" -Filter "*.pyd" | Copy-Item -Destination $dllDir
+        # Copy LICENSE if available
+        if (Test-Path "LICENSE.txt") {
+          Copy-Item "LICENSE.txt" "$dist\"
+        }
 
     - name: Create archive
       shell: pwsh
