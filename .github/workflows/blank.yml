@@ -121,18 +121,7 @@ jobs:
         # Copy extension modules
         New-Item -ItemType Directory -Force -Path "python-arm64-standalone\DLLs"
         Get-ChildItem "$buildDir" -Filter "*.pyd" | Copy-Item -Destination "python-arm64-standalone\DLLs\"
-        
-        # Create a simple test script
-        @"
-import sys
-import platform
-print(f"Python {sys.version}")
-print(f"Platform: {platform.platform()}")
-print(f"Architecture: {platform.machine()}")
-print(f"Processor: {platform.processor()}")
-print("Python ARM64 standalone interpreter is working!")
-"@ | Out-File -FilePath "python-arm64-standalone\test.py" -Encoding UTF8
-        
+ 
     - name: Create archive
       run: |
         cd python-source
@@ -144,49 +133,6 @@ print("Python ARM64 standalone interpreter is working!")
         name: python-arm64-standalone-windows
         path: python-source/python-arm64-standalone.zip
         retention-days: 30
-        
-    - name: Create release info
-      run: |
-        @"
-# Python ARM64 Standalone for Windows
-        
-Built on: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
-Python Version: 3.11.8
-Target: Windows ARM64
-        
-## Contents:
-- python.exe - Python interpreter
-- python311.dll - Python runtime library  
-- python3.dll - Python loader library
-- Lib/ - Python standard library
-- DLLs/ - Extension modules and DLLs
-- test.py - Simple test script
-        
-## Usage:
-1. Extract the zip file
-2. Run: python.exe test.py
-3. Use python.exe as you would any Python interpreter
-        
-## Note:
-This is a standalone build that should run on Windows ARM64 devices
-without requiring a separate Python installation.
-"@ | Out-File -FilePath "python-source/README.md" -Encoding UTF8
-        
-    - name: Upload README
-      uses: actions/upload-artifact@v4
-      with:
-        name: python-arm64-readme
-        path: python-source/README.md
-        retention-days: 30) {
-            [Environment]::SetEnvironmentVariable($matches[1], $matches[2])
-          }
-        }
-        
-        # Configure and build natively on ARM64
-        cd PCbuild
-        
-        # Build Python natively
-        .\build.bat -c Release
         
     - name: Create standalone distribution
       run: |
