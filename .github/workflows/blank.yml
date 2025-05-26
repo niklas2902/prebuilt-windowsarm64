@@ -3,171 +3,99 @@ name: Build Windows ARM64 Python Standalone
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
 
 jobs:
   build-python-arm64:
     runs-on: windows-11-arm
-    
+    timeout-minutes: 60
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      
-    - name: Set up Python build environment
+
+    - name: Ensure Visual Studio is available
+      shell: pwsh
       run: |
-        # Check for existing Visual Studio installations first  
-        $vsPaths = @(
-          "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise",
-          "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional", 
-          "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community",
-          "${env:ProgramFiles}\Microsoft Visual Studio\2022\BuildTools",
-          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Enterprise",
-          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Professional",
-          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Community", 
-          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools"
-        )
-        
-        $vsFound = $false
-        foreach ($path in $vsPaths) {
-          if (Test-Path "$path\VC\Auxiliary\Build\vcvars64.bat") {
-            Write-Host "Found Visual Studio at: $path"
-            $env:VS_PATH = $path
-            $vsFound = $true
-            break
-          }
+        $vcvarsPath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
+        if (-not (Test-Path $vcvarsPath)) {
+          Write-Host "Installing Build Tools..."
+          $url = "https://aka.ms/vs/17/release/vs_buildtools.exe"
+          Invoke-WebRequest -Uri $url -OutFile "vs_buildtools.exe"
+          Start-Process -FilePath "vs_buildtools.exe" -ArgumentList "--quiet", "--wait", "--norestart", `
+            "--add", "Microsoft.VisualStudio.Workload.VCTools", `
+            "--add", "Microsoft.VisualStudio.Component.VC.ATL.ARM64", `
+            "--add", "Microsoft.VisualStudio.Component.VC.Tools.ARM64" -Wait
+        } else {
+          Write-Host "Visual Studio Build Tools already present."
         }
-        
-        if (-not $vsFound) {
-          Write-Host "Installing minimal build tools..."
-          # Use winget as alternative to chocolatey for potentially better compatibility
-          try {
-            winget install Microsoft.VisualStudio.2022.BuildTools --silent --accept-package-agreements --accept-source-agreements
-          } catch {
-            Write-Host "Winget failed, trying direct download..."
-            $url = "https://aka.ms/vs/17/release/vs_buildtools.exe"
-            Invoke-WebRequest -Uri $url -OutFile "vs_buildtools.exe"
-            Start-Process -FilePath "vs_buildtools.exe" -ArgumentList "--quiet", "--wait", "--add", "Microsoft.VisualStudio.Workload.VCTools", "--norestart" -Wait
-          }
-        }
-        
+
     - name: Download Python source
       run: |
         $pythonVersion = "3.11.8"
         $url = "https://www.python.org/ftp/python/$pythonVersion/Python-$pythonVersion.tgz"
         Invoke-WebRequest -Uri $url -OutFile "Python-$pythonVersion.tgz"
-        
-        # Extract using tar (available in Windows 10+)
         tar -xzf "Python-$pythonVersion.tgz"
-        
-        # Rename for easier reference
         Rename-Item "Python-$pythonVersion" "python-source"
-      
+
     - name: Build Python for ARM64
+      shell: cmd
+      working-directory: python-source
       run: |
-        cd python-source
-        
-        # Find and set up Visual Studio environment
-        $vsPaths = @(
-          "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise",
-          "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional", 
-          "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community",
-          "${env:ProgramFiles}\Microsoft Visual Studio\2022\BuildTools",
-          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Enterprise",
-          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Professional",
-          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Community", 
-          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools"
+        REM Locate Visual Studio
+        for %%x in (
+          "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools",
+          "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Community",
+          "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Professional",
+          "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Enterprise"
+        ) do (
+          if exist "%%x\VC\Auxiliary\Build\vcvarsall.bat" (
+            set VS_PATH=%%x
+            goto :found
+          )
         )
-        
-        $vsPath = $null
-        foreach ($path in $vsPaths) {
-          if (Test-Path "$path\VC\Auxiliary\Build\vcvars64.bat") {
-            $vsPath = $path
-            Write-Host "Using Visual Studio at: $path"
-            break
-          }
-        }
-        
-        if (-not $vsPath) {
-          throw "Visual Studio Build Tools not found!"
-        }
-        
-        # Set up build environment
-        cmd /c "`"$vsPath\VC\Auxiliary\Build\vcvars64.bat`" && set" | ForEach-Object {
-          if ($_ -match '^([^=]+)=(.*)
-        
+        echo Visual Studio not found!
+        exit /b 1
+        :found
+
+        echo Using Visual Studio at %VS_PATH%
+        call "%VS_PATH%\VC\Auxiliary\Build\vcvarsall.bat" arm64
+
+        cd PCbuild
+        build.bat -c Release -p ARM64
+
     - name: Create standalone distribution
+      shell: pwsh
+      working-directory: python-source
       run: |
-        cd python-source
-        
-        # Create distribution directory
-        New-Item -ItemType Directory -Force -Path "python-arm64-standalone"
-        
-        # Copy built Python files
-        $buildDir = "PCbuild\amd64"
-        Copy-Item "$buildDir\python.exe" "python-arm64-standalone\"
-        Copy-Item "$buildDir\python311.dll" "python-arm64-standalone\"
-        Copy-Item "$buildDir\python3.dll" "python-arm64-standalone\"
-        
-        # Copy standard library
-        Copy-Item "Lib" "python-arm64-standalone\Lib" -Recurse
-        
-        # Copy DLLs directory if it exists
+        $dist = "python-arm64-standalone"
+        $buildDir = "PCbuild\arm64"
+
+        New-Item -ItemType Directory -Force -Path $dist
+        Copy-Item "$buildDir\python.exe" "$dist\"
+        Copy-Item "$buildDir\python311.dll" "$dist\" -ErrorAction SilentlyContinue
+        Copy-Item "$buildDir\python3.dll" "$dist\" -ErrorAction SilentlyContinue
+
+        Copy-Item "Lib" "$dist\Lib" -Recurse
+
         if (Test-Path "$buildDir\DLLs") {
-          Copy-Item "$buildDir\DLLs" "python-arm64-standalone\DLLs" -Recurse
+          Copy-Item "$buildDir\DLLs" "$dist\DLLs" -Recurse
         }
-        
-        # Copy extension modules
-        New-Item -ItemType Directory -Force -Path "python-arm64-standalone\DLLs"
-        Get-ChildItem "$buildDir" -Filter "*.pyd" | Copy-Item -Destination "python-arm64-standalone\DLLs\"
- 
+
+        $dllDir = "$dist\DLLs"
+        New-Item -ItemType Directory -Force -Path $dllDir
+        Get-ChildItem "$buildDir" -Filter "*.pyd" | Copy-Item -Destination $dllDir
+
     - name: Create archive
-      run: |
-        cd python-source
-        Compress-Archive -Path "python-arm64-standalone\*" -DestinationPath "python-arm64-standalone.zip"
-        
+      shell: pwsh
+      working-directory: python-source
+      run: Compress-Archive -Path "python-arm64-standalone\*" -DestinationPath "python-arm64-standalone.zip"
+
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: python-arm64-standalone-windows
         path: python-source/python-arm64-standalone.zip
         retention-days: 30
-        
-    - name: Create standalone distribution
-      run: |
-        cd python-source
-        
-        # Create distribution directory
-        New-Item -ItemType Directory -Force -Path "python-arm64-standalone"
-        
-        # Copy built Python files
-        $buildDir = "PCbuild\amd64"
-        Copy-Item "$buildDir\python.exe" "python-arm64-standalone\"
-        Copy-Item "$buildDir\python311.dll" "python-arm64-standalone\"
-        Copy-Item "$buildDir\python3.dll" "python-arm64-standalone\"
-        
-        # Copy standard library
-        Copy-Item "Lib" "python-arm64-standalone\Lib" -Recurse
-        
-        # Copy DLLs directory if it exists
-        if (Test-Path "$buildDir\DLLs") {
-          Copy-Item "$buildDir\DLLs" "python-arm64-standalone\DLLs" -Recurse
-        }
-        
-        # Copy extension modules
-        New-Item -ItemType Directory -Force -Path "python-arm64-standalone\DLLs"
-        Get-ChildItem "$buildDir" -Filter "*.pyd" | Copy-Item -Destination "python-arm64-standalone\DLLs\"
-                
-    - name: Create archive
-      run: |
-        cd python-source
-        Compress-Archive -Path "python-arm64-standalone\*" -DestinationPath "python-arm64-standalone.zip"
-        
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: python-arm64-standalone-windows
-        path: python-source/python-arm64-standalone.zip
-        retention-days: 30
-        
