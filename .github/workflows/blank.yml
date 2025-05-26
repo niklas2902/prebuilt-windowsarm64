@@ -87,33 +87,6 @@ jobs:
         path: python-source/python-arm64-standalone.zip
         retention-days: 30
         
-    - name: Create release info
-      run: |
-        @"
-# Python ARM64 Standalone for Windows
-        
-Built on: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
-Python Version: 3.11.8
-Target: Windows ARM64
-        
-## Contents:
-- python.exe - Python interpreter
-- python311.dll - Python runtime library  
-- python3.dll - Python loader library
-- Lib/ - Python standard library
-- DLLs/ - Extension modules and DLLs
-- test.py - Simple test script
-        
-## Usage:
-1. Extract the zip file
-2. Run: python.exe test.py
-3. Use python.exe as you would any Python interpreter
-        
-## Note:
-This is a standalone build that should run on Windows ARM64 devices
-without requiring a separate Python installation.
-"@ | Out-File -FilePath "python-source/README.md" -Encoding UTF8
-        
     - name: Upload README
       uses: actions/upload-artifact@v4
       with:
