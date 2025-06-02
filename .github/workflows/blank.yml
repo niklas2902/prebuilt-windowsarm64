@@ -65,6 +65,7 @@ jobs:
         call "%VS_PATH%\VC\Auxiliary\Build\vcvarsall.bat" arm64
 
         cd PCbuild
+        set CL=/D_WIN32_WINNT=0x0A00
         build.bat -c Release -p ARM64
 
     - name: Create standalone distribution
