@@ -45,28 +45,24 @@ jobs:
       shell: cmd
       working-directory: python-source
       run: |
-        REM Locate Visual Studio
-        for %%x in (
-          "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools",
-          "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Community",
-          "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Professional",
-          "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Enterprise"
+        REM Locate Visual Studio using vswhere
+        for /f "tokens=*" %%i in (
+          '"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.VisualStudio.Component.VC.Tools.arm64 -property installationPath'
         ) do (
-          if exist "%%x\VC\Auxiliary\Build\vcvarsall.bat" (
-            set VS_PATH=%%x
-            goto :found
-          )
+        set "VS_PATH=%%i"
         )
-        echo Visual Studio not found!
-        exit /b 1
-        :found
 
-        echo Using Visual Studio at %VS_PATH%
-        call "%VS_PATH%\VC\Auxiliary\Build\vcvarsall.bat" arm64
+        if not defined VS_PATH (
+          echo Visual Studio not found!
+          exit /b 1
+         )
 
-        cd PCbuild
-        set CL=/D_WIN32_WINNT=0x0A00
-        build.bat -c Release -p ARM64
+         echo Using Visual Studio at %VS_PATH%
+         call "%VS_PATH%\VC\Auxiliary\Build\vcvarsall.bat" arm64
+
+         cd PCbuild
+         set CL=/D_WIN32_WINNT=0x0A00
+         build.bat -c Release -p ARM64
 
     - name: Create standalone distribution
       shell: pwsh
