@@ -34,7 +34,7 @@ jobs:
 
     - name: Download Python source
       run: |
-        $pythonVersion = "3.11.8"
+        $pythonVersion = "3.12.4"
         $url = "https://www.python.org/ftp/python/$pythonVersion/Python-$pythonVersion.tgz"
         Invoke-WebRequest -Uri $url -OutFile "Python-$pythonVersion.tgz"
         tar -xzf "Python-$pythonVersion.tgz"
@@ -100,14 +100,21 @@ jobs:
         if (Test-Path "LICENSE.txt") {
           Copy-Item "LICENSE.txt" "$dist\"
         }
+    - name: Prepare archive content
+      shell: pwsh
+      working-directory: python-source
+      run: |
+        New-Item -ItemType Directory -Force -Path python
+        Copy-Item -Path "python-arm64-standalone\*" -Destination "python" -Recurse
+
     - name: Create archive
       shell: pwsh
       working-directory: python-source
-      run: Compress-Archive -Path "python-arm64-standalone\*" -DestinationPath "python-arm64-standalone.zip"
+      run: Compress-Archive -Path "python\*" -DestinationPath "cpython-3.12.4-windowsarm64.zip"
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: python-arm64-standalone-windows
-        path: python-source/python-arm64-standalone.zip
+        path: python-source/cpython-3.12.4-windowsarm64.zip
         retention-days: 30
