@@ -83,10 +83,22 @@ jobs:
         Copy-Item "$buildDir\vcruntime140*.dll" "$dist\" -ErrorAction SilentlyContinue
 
         # Copy directories: Lib, DLLs, Scripts, etc.
-        foreach ($dir in "DLLs", "include", "Lib", "Scripts", "tcl") {
+        foreach ($dir in "DLLs", "Lib", "Scripts", "tcl") {
           if (Test-Path $dir) {
             Copy-Item $dir "$dist\$dir" -Recurse
           }
+        }
+
+        # Copy Include directory with all headers
+        New-Item -ItemType Directory -Force -Path "$dist\Include"
+        Copy-Item "Include\*" "$dist\Include\" -Recurse
+
+        # CRITICAL: Copy the generated pyconfig.h from PC directory
+        Copy-Item "PC\pyconfig.h" "$dist\Include\pyconfig.h" -Force
+
+        # Also copy the platform-specific pyconfig.h if it exists
+        if (Test-Path "$buildDir\pyconfig.h") {
+          Copy-Item "$buildDir\pyconfig.h" "$dist\Include\pyconfig.h" -Force
         }
 
         # Create and copy .lib files into libs/
@@ -98,6 +110,19 @@ jobs:
         if (Test-Path "LICENSE.txt") {
           Copy-Item "LICENSE.txt" "$dist\"
         }
+
+        # Verify pyconfig.h was copied
+        if (Test-Path "$dist\Include\pyconfig.h") {
+          Write-Host "✓ pyconfig.h successfully copied"
+        } else {
+          Write-Host "✗ ERROR: pyconfig.h not found!"
+          Write-Host "Available files in PC directory:"
+          Get-ChildItem "PC" -Name
+          Write-Host "Available files in build directory:"
+          Get-ChildItem "$buildDir" -Name
+          exit 1
+        }
+
     - name: Prepare archive content
       shell: pwsh
       working-directory: python-source
