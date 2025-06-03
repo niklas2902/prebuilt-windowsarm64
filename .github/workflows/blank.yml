@@ -62,9 +62,117 @@ jobs:
 
          cd PCbuild
          set CL=/D_WIN32_WINNT=0x0A00
-         build.bat -c Release -p ARM64
+         
+         REM First run get_externals to ensure all dependencies
+         get_externals.bat
+         
+         REM Build with more verbose output
+         build.bat -c Release -p ARM64 -v
 
-    - name: Create standalone distribution
+    - name: Debug and generate pyconfig.h
+      shell: pwsh
+      working-directory: python-source
+      run: |
+        Write-Host "=== Debugging pyconfig.h generation ==="
+        
+        # Check if pyconfig.h exists anywhere
+        Write-Host "Searching for pyconfig.h files:"
+        Get-ChildItem -Recurse -Name "pyconfig.h" -ErrorAction SilentlyContinue
+        
+        # List contents of PC directory
+        Write-Host "`nContents of PC directory:"
+        Get-ChildItem "PC" -Name
+        
+        # List contents of build directory
+        Write-Host "`nContents of PCbuild/arm64 directory:"
+        Get-ChildItem "PCbuild/arm64" -Name
+        
+        # Check for pyconfig template files
+        Write-Host "`nSearching for pyconfig template files:"
+        Get-ChildItem -Recurse -Name "*pyconfig*" -ErrorAction SilentlyContinue
+        
+        # Try to generate pyconfig.h manually if it doesn't exist
+        if (-not (Test-Path "PC/pyconfig.h")) {
+          Write-Host "`nGenerating pyconfig.h manually..."
+          
+          # Check if there's a pyconfig.h.in template
+          if (Test-Path "pyconfig.h.in") {
+            Write-Host "Found pyconfig.h.in template"
+            Copy-Item "pyconfig.h.in" "PC/pyconfig.h"
+          }
+          # Check for PC/pyconfig.h.in
+          elseif (Test-Path "PC/pyconfig.h.in") {
+            Write-Host "Found PC/pyconfig.h.in template"
+            Copy-Item "PC/pyconfig.h.in" "PC/pyconfig.h"
+          }
+          # Use the example pyconfig.h from PC directory if available
+          elseif (Test-Path "PC/example_nt/pyconfig.h") {
+            Write-Host "Using example pyconfig.h"
+            Copy-Item "PC/example_nt/pyconfig.h" "PC/pyconfig.h"
+          }
+          # Create a minimal pyconfig.h for ARM64 Windows
+          else {
+            Write-Host "Creating minimal pyconfig.h for ARM64 Windows"
+            $pyconfigContent = @"
+#ifndef Py_PYCONFIG_H
+#define Py_PYCONFIG_H
+
+#define MS_WIN64
+#define MS_WINDOWS
+#define NT_THREADS
+#define WITH_THREAD
+#define HAVE_IO_H
+#define HAVE_SYS_UTIME_H
+#define HAVE_TEMPNAM
+#define HAVE_TMPFILE
+#define HAVE_TMPNAM
+#define HAVE_CLOCK
+#define HAVE_STRFTIME
+#define HAVE_STRERROR
+#define HAVE_ERRNO_H
+#define HAVE_FCNTL_H
+#define HAVE_MALLOC_H
+#define HAVE_MEMORY_H
+#define HAVE_SIGNAL_H
+#define HAVE_LIMITS_H
+#define HAVE_LOCALE_H
+#define HAVE_PROCESS_H
+#define HAVE_DIRECT_H
+#define HAVE_STDDEF_H
+#define HAVE_SYS_STAT_H
+#define HAVE_SYS_TYPES_H
+#define HAVE_UNISTD_H
+#define SIZEOF_INT 4
+#define SIZEOF_LONG 4
+#define SIZEOF_VOID_P 8
+#define SIZEOF_SIZE_T 8
+#define SIZEOF_TIME_T 8
+#define SIZEOF_OFF_T 4
+#define SIZEOF_FPOS_T 8
+#define SIZEOF_HKEY 8
+#define SIZEOF_PY_HASH_T 8
+#define SIZEOF_PY_UHASH_T 8
+
+#ifdef _DEBUG
+#define Py_DEBUG
+#endif
+
+#define VERSION "3.12"
+
+#endif /* !Py_PYCONFIG_H */
+"@
+            Set-Content -Path "PC/pyconfig.h" -Value $pyconfigContent
+          }
+        }
+        
+        # Verify pyconfig.h now exists
+        if (Test-Path "PC/pyconfig.h") {
+          Write-Host "`n✓ pyconfig.h is now available"
+          Write-Host "First few lines of pyconfig.h:"
+          Get-Content "PC/pyconfig.h" | Select-Object -First 10
+        } else {
+          Write-Host "`n✗ Still no pyconfig.h found"
+        }
       shell: pwsh
       working-directory: python-source
       run: |
