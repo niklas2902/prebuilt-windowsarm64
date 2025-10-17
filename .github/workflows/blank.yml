@@ -78,7 +78,7 @@ jobs:
         Copy-Item "Python-3.12.4\PC\pyconfig.h" -Destination "$outputDir\include" -Force
         
         # Create a README
-        @"
+        $readmeContent = @'
 Python 3.12.4 for Windows ARM64
 ================================
 
@@ -97,7 +97,8 @@ Usage:
   .\python.exe --version
   .\python.exe -m pip install <package>
 
-"@ | Out-File -FilePath "$outputDir\README.txt" -Encoding utf8
+'@
+        $readmeContent | Out-File -FilePath "$outputDir\README.txt" -Encoding utf8
         
         # Create zip archive
         Compress-Archive -Path $outputDir -DestinationPath "python-3.12.4-win-arm64.zip"
