@@ -77,29 +77,6 @@ jobs:
         Copy-Item "Python-3.12.4\Include\*" -Destination "$outputDir\include" -Recurse -Force
         Copy-Item "Python-3.12.4\PC\pyconfig.h" -Destination "$outputDir\include" -Force
         
-        # Create a README
-        $readmeContent = @'
-Python 3.12.4 for Windows ARM64
-================================
-
-Built from source using Visual Studio.
-
-Contents:
-- python.exe - Python interpreter
-- pythonw.exe - Python interpreter (no console)
-- python312.dll - Python runtime
-- DLLs/ - Extension modules
-- Lib/ - Standard library
-- libs/ - Import libraries for linking
-- include/ - Header files
-
-Usage:
-  .\python.exe --version
-  .\python.exe -m pip install <package>
-
-'@
-        $readmeContent | Out-File -FilePath "$outputDir\README.txt" -Encoding utf8
-        
         # Create zip archive
         Compress-Archive -Path $outputDir -DestinationPath "python-3.12.4-win-arm64.zip"
         
