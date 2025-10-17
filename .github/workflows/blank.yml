@@ -1,251 +1,121 @@
-name: Build Windows ARM64 Python Standalone
+name: Build Python 3.12.4 for Windows ARM64
 
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
+    branches: [ main ]
 
 jobs:
-  build-python-arm64:
-    runs-on: windows-11-arm
-    timeout-minutes: 60
-
+  build-python-windows-arm64:
+    runs-on: windows-latest
+    
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-
-    - name: Ensure Visual Studio is available
+    
+    - name: Setup Visual Studio environment
+      uses: microsoft/setup-msbuild@v2
+      with:
+        vs-version: 'latest'
+    
+    - name: Install Visual Studio ARM64 components
       shell: pwsh
       run: |
-        $vcvarsPath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
-        if (-not (Test-Path $vcvarsPath)) {
-          Write-Host "Installing Build Tools..."
-          $url = "https://aka.ms/vs/17/release/vs_buildtools.exe"
-          Invoke-WebRequest -Uri $url -OutFile "vs_buildtools.exe"
-          Start-Process -FilePath "vs_buildtools.exe" -ArgumentList "--quiet", "--wait", "--norestart", `
-          "--add", "Microsoft.VisualStudio.Workload.VCTools",
-          "--add", "Microsoft.VisualStudio.Component.VC.ATL.ARM64",
-          "--add", "Microsoft.VisualStudio.Component.VC.Tools.ARM64",
-          "--add", "Microsoft.VisualStudio.Component.Windows11SDK.22621"
-        } else {
-          Write-Host "Visual Studio Build Tools already present."
-        }
-
-    - name: Download Python source
+        # Install Visual Studio Build Tools with ARM64 support
+        # Note: This assumes VS is already installed on the runner
+        Write-Host "Visual Studio should already have ARM64 tools on windows-latest runner"
+    
+    - name: Download Python 3.12.4 source
+      shell: pwsh
       run: |
-        $pythonVersion = "3.12.4"
-        $url = "https://www.python.org/ftp/python/$pythonVersion/Python-$pythonVersion.tgz"
-        Invoke-WebRequest -Uri $url -OutFile "Python-$pythonVersion.tgz"
-        tar -xzf "Python-$pythonVersion.tgz"
-        Rename-Item "Python-$pythonVersion" "python-source"
-
+        $url = "https://www.python.org/ftp/python/3.12.4/Python-3.12.4.tgz"
+        Write-Host "Downloading Python 3.12.4 source..."
+        Invoke-WebRequest -Uri $url -OutFile "Python-3.12.4.tgz"
+        
+        # Extract using tar (available in Windows 10+)
+        tar -xzf Python-3.12.4.tgz
+        
+        Write-Host "Python source extracted successfully"
+    
     - name: Build Python for ARM64
       shell: cmd
-      working-directory: python-source
       run: |
-        REM Locate Visual Studio using vswhere
-        for /f "tokens=*" %%i in (
-          '"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.VisualStudio.Component.VC.Tools.arm64 -property installationPath'
-        ) do (
-        set "VS_PATH=%%i"
-        )
-
-        if not defined VS_PATH (
-          echo Visual Studio not found!
-          exit /b 1
-         )
-
-         echo Using Visual Studio at %VS_PATH%
-         call "%VS_PATH%\VC\Auxiliary\Build\vcvarsall.bat" arm64
-
-         cd PCbuild
-         set CL=/D_WIN32_WINNT=0x0A00
-         
-         REM First run get_externals to ensure all dependencies
-         get_externals.bat
-         
-         REM Build with more verbose output
-         build.bat -c Release -p ARM64 -v
-
-    - name: Debug and generate pyconfig.h
+        cd Python-3.12.4\PCbuild
+        
+        echo "Building Python 3.12.4 for Windows ARM64..."
+        
+        REM Build for ARM64 platform
+        build.bat -p ARM64 -c Release
+    
+    - name: Package Python ARM64 build
       shell: pwsh
-      working-directory: python-source
       run: |
-        Write-Host "=== Debugging pyconfig.h generation ==="
+        $buildDir = "Python-3.12.4\PCbuild\arm64"
+        $outputDir = "python-3.12.4-win-arm64"
         
-        # Check if pyconfig.h exists anywhere
-        Write-Host "Searching for pyconfig.h files:"
-        Get-ChildItem -Recurse -Name "pyconfig.h" -ErrorAction SilentlyContinue
+        Write-Host "Packaging Python ARM64 binaries..."
         
-        # List contents of PC directory
-        Write-Host "`nContents of PC directory:"
-        Get-ChildItem "PC" -Name
+        # Create output directory structure
+        New-Item -ItemType Directory -Force -Path $outputDir
+        New-Item -ItemType Directory -Force -Path "$outputDir\DLLs"
+        New-Item -ItemType Directory -Force -Path "$outputDir\Lib"
+        New-Item -ItemType Directory -Force -Path "$outputDir\libs"
+        New-Item -ItemType Directory -Force -Path "$outputDir\include"
         
-        # List contents of build directory
-        Write-Host "`nContents of PCbuild/arm64 directory:"
-        Get-ChildItem "PCbuild/arm64" -Name
+        # Copy binaries
+        Copy-Item "$buildDir\*.exe" -Destination $outputDir -ErrorAction SilentlyContinue
+        Copy-Item "$buildDir\*.dll" -Destination $outputDir -ErrorAction SilentlyContinue
+        Copy-Item "$buildDir\*.pyd" -Destination "$outputDir\DLLs" -ErrorAction SilentlyContinue
         
-        # Check for pyconfig template files
-        Write-Host "`nSearching for pyconfig template files:"
-        Get-ChildItem -Recurse -Name "*pyconfig*" -ErrorAction SilentlyContinue
+        # Copy libs
+        Copy-Item "$buildDir\*.lib" -Destination "$outputDir\libs" -ErrorAction SilentlyContinue
         
-        # Try to generate pyconfig.h manually if it doesn't exist
-        if (-not (Test-Path "PC/pyconfig.h")) {
-          Write-Host "`nGenerating pyconfig.h manually..."
-          
-          # Check if there's a pyconfig.h.in template
-          if (Test-Path "pyconfig.h.in") {
-            Write-Host "Found pyconfig.h.in template"
-            Copy-Item "pyconfig.h.in" "PC/pyconfig.h"
-          }
-          # Check for PC/pyconfig.h.in
-          elseif (Test-Path "PC/pyconfig.h.in") {
-            Write-Host "Found PC/pyconfig.h.in template"
-            Copy-Item "PC/pyconfig.h.in" "PC/pyconfig.h"
-          }
-          # Use the example pyconfig.h from PC directory if available
-          elseif (Test-Path "PC/example_nt/pyconfig.h") {
-            Write-Host "Using example pyconfig.h"
-            Copy-Item "PC/example_nt/pyconfig.h" "PC/pyconfig.h"
-          }
-          # Create a minimal pyconfig.h for ARM64 Windows
-          else {
-            Write-Host "Creating minimal pyconfig.h for ARM64 Windows"
-            $pyconfigContent = @"
-#ifndef Py_PYCONFIG_H
-#define Py_PYCONFIG_H
-
-#define MS_WIN64
-#define MS_WINDOWS
-#define NT_THREADS
-#define WITH_THREAD
-#define HAVE_IO_H
-#define HAVE_SYS_UTIME_H
-#define HAVE_TEMPNAM
-#define HAVE_TMPFILE
-#define HAVE_TMPNAM
-#define HAVE_CLOCK
-#define HAVE_STRFTIME
-#define HAVE_STRERROR
-#define HAVE_ERRNO_H
-#define HAVE_FCNTL_H
-#define HAVE_MALLOC_H
-#define HAVE_MEMORY_H
-#define HAVE_SIGNAL_H
-#define HAVE_LIMITS_H
-#define HAVE_LOCALE_H
-#define HAVE_PROCESS_H
-#define HAVE_DIRECT_H
-#define HAVE_STDDEF_H
-#define HAVE_SYS_STAT_H
-#define HAVE_SYS_TYPES_H
-#define HAVE_UNISTD_H
-#define SIZEOF_INT 4
-#define SIZEOF_LONG 4
-#define SIZEOF_VOID_P 8
-#define SIZEOF_SIZE_T 8
-#define SIZEOF_TIME_T 8
-#define SIZEOF_OFF_T 4
-#define SIZEOF_FPOS_T 8
-#define SIZEOF_HKEY 8
-#define SIZEOF_PY_HASH_T 8
-#define SIZEOF_PY_UHASH_T 8
-
-#ifdef _DEBUG
-#define Py_DEBUG
-#endif
-
-#define VERSION "3.12"
-
-#endif /* !Py_PYCONFIG_H */
-"@
-            Set-Content -Path "PC/pyconfig.h" -Value $pyconfigContent
-          }
-        }
+        # Copy standard library
+        Copy-Item "Python-3.12.4\Lib\*" -Destination "$outputDir\Lib" -Recurse -Force
         
-        # Verify pyconfig.h now exists
-        if (Test-Path "PC/pyconfig.h") {
-          Write-Host "`n✓ pyconfig.h is now available"
-          Write-Host "First few lines of pyconfig.h:"
-          Get-Content "PC/pyconfig.h" | Select-Object -First 10
-        } else {
-          Write-Host "`n✗ Still no pyconfig.h found"
-        }
-      shell: pwsh
-      working-directory: python-source
-      run: |
-        $dist = "python-arm64-standalone"
-        $buildDir = "PCbuild\arm64"
+        # Copy include files
+        Copy-Item "Python-3.12.4\Include\*" -Destination "$outputDir\include" -Recurse -Force
+        Copy-Item "Python-3.12.4\PC\pyconfig.h" -Destination "$outputDir\include" -Force
+        
+        # Create a README
+        @"
+Python 3.12.4 for Windows ARM64
+================================
 
-        # Clean and recreate output directory
-        Remove-Item -Recurse -Force $dist -ErrorAction SilentlyContinue
-        New-Item -ItemType Directory -Force -Path $dist
+Built from source using Visual Studio.
 
-        # Copy executables and runtime DLLs
-        Copy-Item "$buildDir\python.exe" "$dist\"
-        Copy-Item "$buildDir\pythonw.exe" "$dist\" -ErrorAction SilentlyContinue
-        Copy-Item "$buildDir\python3.dll" "$dist\" -ErrorAction SilentlyContinue
-        Copy-Item "$buildDir\python*.dll" "$dist\" -ErrorAction SilentlyContinue
-        Copy-Item "$buildDir\vcruntime140*.dll" "$dist\" -ErrorAction SilentlyContinue
+Contents:
+- python.exe - Python interpreter
+- pythonw.exe - Python interpreter (no console)
+- python312.dll - Python runtime
+- DLLs/ - Extension modules
+- Lib/ - Standard library
+- libs/ - Import libraries for linking
+- include/ - Header files
 
-        # Copy directories: Lib, DLLs, Scripts, etc.
-        foreach ($dir in "DLLs", "Lib", "Scripts", "tcl") {
-          if (Test-Path $dir) {
-            Copy-Item $dir "$dist\$dir" -Recurse
-          }
-        }
+Usage:
+  .\python.exe --version
+  .\python.exe -m pip install <package>
 
-        # Copy Include directory with all headers
-        New-Item -ItemType Directory -Force -Path "$dist\Include"
-        Copy-Item "Include\*" "$dist\Include\" -Recurse
-
-        # CRITICAL: Copy the generated pyconfig.h from PC directory
-        Copy-Item "PC\pyconfig.h" "$dist\Include\pyconfig.h" -Force
-
-        # Also copy the platform-specific pyconfig.h if it exists
-        if (Test-Path "$buildDir\pyconfig.h") {
-          Copy-Item "$buildDir\pyconfig.h" "$dist\Include\pyconfig.h" -Force
-        }
-
-        # Create and copy .lib files into libs/
-        $libsDest = Join-Path $dist "libs"
-        New-Item -ItemType Directory -Force -Path $libsDest
-        Get-ChildItem "$buildDir" -Filter "*.lib" | Copy-Item -Destination $libsDest
-
-        # Copy LICENSE
-        if (Test-Path "LICENSE.txt") {
-          Copy-Item "LICENSE.txt" "$dist\"
-        }
-
-        # Verify pyconfig.h was copied
-        if (Test-Path "$dist\Include\pyconfig.h") {
-          Write-Host "✓ pyconfig.h successfully copied"
-        } else {
-          Write-Host "✗ ERROR: pyconfig.h not found!"
-          Write-Host "Available files in PC directory:"
-          Get-ChildItem "PC" -Name
-          Write-Host "Available files in build directory:"
-          Get-ChildItem "$buildDir" -Name
-          exit 1
-        }
-
-    - name: Prepare archive content
-      shell: pwsh
-      working-directory: python-source
-      run: |
-        New-Item -ItemType Directory -Force -Path python
-        Copy-Item -Path "python-arm64-standalone\*" -Destination "python" -Recurse
-
-    - name: Create archive
-      shell: pwsh
-      working-directory: python-source
-      run: Compress-Archive -Path "python\*" -DestinationPath "cpython-3.12.4-windowsarm64.zip"
-
-    - name: Upload artifact
+"@ | Out-File -FilePath "$outputDir\README.txt" -Encoding utf8
+        
+        # Create zip archive
+        Compress-Archive -Path $outputDir -DestinationPath "python-3.12.4-win-arm64.zip"
+        
+        Write-Host "Build packaged successfully"
+    
+    - name: Upload Python ARM64 artifact
       uses: actions/upload-artifact@v4
       with:
-        name: python-arm64-standalone-windows
-        path: python-source/cpython-3.12.4-windowsarm64.zip
+        name: python-3.12.4-windows-arm64
+        path: python-3.12.4-win-arm64.zip
         retention-days: 30
+    
+    - name: Upload build logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: Python-3.12.4/PCbuild/*.log
+        retention-days: 7
+        if-no-files-found: ignore
